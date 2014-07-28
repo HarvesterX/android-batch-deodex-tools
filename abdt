@@ -1,0 +1,204 @@
+#!/bin/bash
+
+# FILE
+#   abdt
+
+# AUTHOR
+#   (initial) HarvesterX™
+
+# -----------------------------------------------------------------------------------------------
+# WARNING:
+# I should have this all capitalized but that mucks with my eyes and I'm sure yours 
+# as well, but I cannot stress enough that when editing these scripts use a proper editor such
+# as DroidEdit (if on Android) with word wrap turned off. Word wrap is evil for developers
+# except maybe a crazy few. If you tuej your device into landscape (which is how I wrote this)
+# you'll likely notice thst the '#' at tue beginning of each comment are not located in the proper
+# location unless word wrap is turned off and their placement will be deformed and cause all sorts
+# of errors. I tend to use lines of 70-90 characters width (unless in long code) and if you tried 
+# to edit this in say, Root Explorer's Text editor and then resaved the changes then all you're
+# have are errors. Just a standard warning aince we live in an age of word wrap.
+# 
+#
+# DISCLAIMER:
+# This script has been fully tested and and cannot and will not be held responsible
+# for any harm done to your device due to you modifying code and making a bad mistake (maybe like 
+# writing a "rm -rf /sdcard" command and forgetting to add the rest of the directory path to 
+# delete). 
+# -----------------------------------------------------------------------------------------------
+
+# PURPOSE:
+#
+# This script defines the paths our project uses as well as wrapper functions for calling
+# baksmali and smali. Makes making subtle chamges based off any path changes someone else 
+# makes or where the JRE is installed much simpler.
+
+# -----------------------------------------------------------------------------------------------
+# Project level variables. Well for now all script level but for customability and for future 
+# unknown edits let's give them a project level scope.
+
+# Project root directory. Change this is you change the root project directory on your internal
+# storage
+proj_root="/sdcard/bdt"
+
+# Either the baksmali or smali jars complain (rightfully so I guess if we don't export the path 
+# that contains our non JRE library files
+export LD_LIBRARY_PATH="/data/app-lib/com.firestorm.bdt"
+
+# Path to where JRE is installed on your device (may be in several places depending on amount of
+# apps using it. If so much wasn't hardcoded maybe all these apps could all share the code one day.
+jre_path="/data/app-lib/com.firestorm.bdt/jre"
+
+# Path to android framework directory which is usually /system/framework so let's just hardcore it.
+framework_path="/system/framework"
+
+# Path to where you'd prefer baksmali and smali logs to be written to
+baksmali_log_path="/sdcard/baksmali_log.txt"
+smali_log_path="/sdcard/smali_log.txt"
+
+
+# Path to baksmali and smali jars. 
+baksmali_jar="$proj_root/baksmali-2.0.2.jar"
+smali_jar="$proj_root/smali-2.0.2.jar"
+
+# Path to our odex files that we will be turning into deompiled smali source folders into our
+# $proj_path directory so create this directory if it's ever missing. Not everyone might be able
+# to always do it for you. It's your sdcard afterall...:)
+deodex_path="$proj_root/files-to-deodex"
+
+# Path to the smali source path created after baksmali'ing an archive. Same as above applies here,
+# and for the next few paths actually.
+source_path="$proj_root/smali-source"
+
+# Path to recompiled dex files made from the above smali source after callng smali on the source 
+# code.
+dex_path="$proj_root/dex-out"
+
+# Path to our final deodexed apks/jars directory where our finished archives will be with the above
+# dex file inserted into them named "classes.dex".
+deodexedout_path="$proj_root/deodexed-out"
+
+# Path to to directory which contains the odex files to deodex into smali source.
+baksmali_path="$proj_root/files-to-baksmali"
+
+# -----------------------------------------------------------------------------------------------
+# Function: baksmali
+# Purpose: Wrapper function for calling the baksmali jar
+# Arguments:
+#   $1 - odex file to decompile 
+
+baksmali() {
+
+   if [[ -e $1 ]]; then
+
+      b=$(basename $1); b="${b%.*}"
+
+      $jre_path/bin/java -Xmx1024m -jar $baksmali_jar -x $1 -d $framework_path -o $source_path/$b &> $baksmali_log_path
+   
+   else
+      ToDo: Add code for handling invalid odex files or files passed in thst aren't odex files
+
+   fi
+
+} 
+
+# -----------------------------------------------------------------------------------------------
+# Function: smali
+# Purpose: Wrapper function for calling the smali jar. 
+#
+# Arguments:
+#   $1 - deodexed source directory to recompile 
+#
+
+smali() {
+
+   if [[ -d $1 ]]; then
+    
+      b=$(basename $1); b="${b%.*}"
+
+      $jre_path/bin/java -Xmx1024m -jar $smali_jar $1 -o $dex_path/$b.dex &> $smali_log_path
+
+   else
+      ToDo: Add code for handling invalid source directories passed in
+
+   fi
+
+} 
+
+# -----------------------------------------------------------------------------------------------
+# Function: batch-baksmali
+# Purpose: Batch baksmali function that decompiles all odex files and apks in $baksmali_path. 
+
+batch-baksmali() {
+
+   for i in {$baksmali_path/*.odex,$baksmali_path/*.apk}; do
+      baksmali $i
+   done
+
+} 
+
+# -----------------------------------------------------------------------------------------------
+# Function: batch-smali
+# Purpose: Batch smali function that recompiles all folders in $SOURCE_path. 
+
+batch-smali() {
+
+   for i in $source_path/*; do 
+      smali $i
+   done
+}
+
+# -----------------------------------------------------------------------------------------------
+# Function bdt-batch-deodex
+# Pupose: Batch deodex function that performs a batch baksmali, then batch smali, and finally 
+# inserts the dex file into the original archive named "classes.dex" thereby deodexing 
+
+bdt-batch-deodex() {
+   
+   cp -f $deodex_path/*.odex $baksmali_path
+  
+   batch-baksmali
+
+   batch-smali
+
+   # CAREFUL HERE! DON'T "rm -rf /sdcard" :)
+   rm -rf $source_path/*/
+
+   for i in $dex_path/*; do
+
+      b=$(basename $i); b="${b%.*}"
+      archive=""
+ 
+      if [[ -f $deodex_path/$b.apk ]]; then
+         archive=$deodex_path/$b.apk
+      elif [[ -f $deodex_path/$b.jar ]]; then
+         archive=$deodex_path/$b.jar
+      fi
+
+      if [[ $archive != "" ]]; then 
+         echo "...Inserting classes.dex into archive"
+         cp $i $dex_path/classes.dex
+         zip -j -q $archive $dex_path/classes.dex
+         echo "...Removing temp classes.dex file"
+         rm -f $dex_path/classes.dex
+ 
+      else
+         # ToDo: Add code for handling invlid archives
+    
+      fi
+
+   done
+ 
+   echo "...Moving archives to $deodexedout_path and removing all temp files and source direcories . Deodexing complete!"
+   
+   cp -f $deodex_path/*.apk $deodexedout_path/
+   cp -f $deodex_path/*.jar $deodexedout_path/
+
+   rm -f $deodex_path/*.odex 
+   rm -f $baksmali_path/*.odex 
+   rm -f $dex_path/*.dex
+   rm -f $deodex_path/*.apk
+   rm -f $deodex_path/*.jar
+
+}
+# -----------------------------------------------------------------------------------------------
+# END OF
